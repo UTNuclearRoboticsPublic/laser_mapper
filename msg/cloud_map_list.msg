@@ -1,0 +1,2 @@
+
+cloud_map[] 	clouds
