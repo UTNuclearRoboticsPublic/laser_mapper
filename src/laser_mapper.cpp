@@ -11,13 +11,16 @@ LaserMapper::LaserMapper()
 {
 	// *** Subscribers ***
 	tf::TransformListener tf_listener_;
-	std::string pointcloud_topic;
-	if( !nh_.param<std::string>("laser_stitcher/planar_scan_topic", pointcloud_topic, "laser_stitcher/planar_scan") )
-		ROS_WARN_STREAM("[LaserMapper] Failed to get laser topic from parameter server - defaulting to " << pointcloud_topic << ".");
-	planar_scan_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointcloud_topic, 100, &LaserMapper::planarScanCallback, this);
-	if( !nh_.param<std::string>("laser_stitcher/full_scan_topic", pointcloud_topic, "laser_stitcher/full_scan") )
-		ROS_WARN_STREAM("[LaserMapper] Failed to get laser topic from parameter server - defaulting to " << pointcloud_topic << ".");
-	full_scan_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>(pointcloud_topic, 100, &LaserMapper::fullScanCallback, this);
+	std::string subscriber_topics;
+	if( !nh_.param<std::string>("laser_stitcher/planar_scan_topic", subscriber_topics, "laser_stitcher/planar_scan") )
+		ROS_WARN_STREAM("[LaserMapper] Failed to get planar cloud topic from parameter server - defaulting to " << subscriber_topics << ".");
+	planar_scan_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>(subscriber_topics, 100, &LaserMapper::planarScanCallback, this);
+	if( !nh_.param<std::string>("laser_stitcher/full_scan_topic", subscriber_topics, "laser_stitcher/full_scan") )
+		ROS_WARN_STREAM("[LaserMapper] Failed to get full scan topic from parameter server - defaulting to " << subscriber_topics << ".");
+	full_scan_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>(subscriber_topics, 100, &LaserMapper::fullScanCallback, this);
+	if( !nh_.param<std::string>("laser_stitcher/scanning_state_topic", subscriber_topics, "laser_stitcher/scanning_state") )
+		ROS_WARN_STREAM("[LaserMapper] Failed to get routine ending message topic from parameter server - defaulting to " << subscriber_topics << ".");
+	scan_end_sub_ = nh_.subscribe<std_msgs::Bool>(subscriber_topics, 100, &LaserMapper::routineEndCallback, this);
 
 	// *** Set Up Settings ***
 	std::string yaml_file_name;
@@ -31,8 +34,9 @@ LaserMapper::LaserMapper()
 	// *** Pointcloud Processor *** 
 	pointcloud_processor_ = nh_.serviceClient<pointcloud_processing_server::pointcloud_process>("pointcloud_service");
 
-	// *** Save Clouds Service ***
+	// *** Cloud Access Services ***
 	cloud_saving_server_ = nh_.advertiseService("save_cloud_maps", &LaserMapper::saveClouds, this);
+	cloud_resetting_server_ = nh_.advertiseService("reset_cloud_maps", &LaserMapper::resetClouds, this);
 
 	ros::Duration(0.50).sleep();
 	ROS_INFO_STREAM("[LaserMapper] Stitcher online and ready. Listening on topics " << planar_scan_sub_.getTopic() << " and " << full_scan_sub_.getTopic());
@@ -180,9 +184,9 @@ bool LaserMapper::saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger:
 			std::string bag_name = "laser_mapper_" + outputs_[i].map.name + std::to_string(ros::Time::now().toSec()) + ".bag";
 			bag.open(bag_name, rosbag::bagmode::Write);
 			bag.write(outputs_[i].map_pub.getTopic(), ros::Time::now(), outputs_[i].map.pointcloud);
-			ROS_INFO_STREAM("[LaserStitcher] Saved a ROSBAG to the file " << bag_name);
+			ROS_INFO_STREAM("[LaserMapper] Saved a ROSBAG to the file " << bag_name);
 		}
-		ROS_INFO_STREAM("[LaserStitcher] Outputting a full map with name " << outputs_[i].map.name << ". Cloud size: " << outputs_[i].map.pointcloud.height * outputs_[i].map.pointcloud.width << ".");
+		ROS_INFO_STREAM("[LaserMapper] Outputting a full map with name " << outputs_[i].map.name << ". Cloud size: " << outputs_[i].map.pointcloud.height * outputs_[i].map.pointcloud.width << ".");
 
 		sensor_msgs::PointCloud2Modifier cloud_modifier_(outputs_[i].map.pointcloud);
 		cloud_modifier_.resize(0);
@@ -190,6 +194,56 @@ bool LaserMapper::saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger:
 	}
 } 
 
+
+
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+// Clear Clouds
+//   Service call, clears a selected set of output clouds and restarts them from scratch
+bool LaserMapper::resetClouds(laser_mapper::cloud_select_service::Request &req, laser_mapper::cloud_select_service::Response &res)
+{
+	for(int i=0; i<req.cloud_list.size(); i++)
+	{
+		res.success.push_back(false);
+		for(int j=0; j<outputs_.size(); j++)
+		{
+			if(req.cloud_list[i].compare(outputs_[j].map.name) == 0)
+			{
+				res.success[i] = true;
+				break;
+			}
+		}
+		if(res.success[i] == false)
+			ROS_WARN_STREAM("[LaserMapper] Reset requested for cloud " << req.cloud_list[i] << ", but that that cloud is not known.");
+	}
+}
+
+
+
+// ----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
+// Scan Finished Callback
+//   This listens for when laser_stitcher receives an input message to end a scanning routine. 
+//   Once this occurs, the laser_mapper will reset any clouds which have 'persistent' set to false (the yaml parameter retain_after_scan)
+void LaserMapper::routineEndCallback(const std_msgs::Bool::ConstPtr& new_state)
+{
+	// Only reset non-persistent clouds when a new scan routine is being STARTED
+	//   This means that when a routine is ended laser_mapper clouds will be kept until a new one is started (useful if only running once, not in loop)
+	//   Note - right now this doesn't check the state of the laser_stitcher, so if a second 'start' message is received during a running routine,
+	//   the laser_mapper clouds will be reset even though the laser_stitcher clouds will not.
+	if(!new_state->data)
+		return; 			  
+	for(int i=0; i<outputs_.size(); i++)
+	{
+		if(!outputs_[i].map.persistent)
+		{
+			sensor_msgs::PointCloud2 new_cloud;
+			new_cloud.header.frame_id = outputs_[i].map.pointcloud.header.frame_id;
+			new_cloud.header.stamp = ros::Time::now();
+			outputs_[i].map.pointcloud = new_cloud;
+		}
+	}
+}
 
 
 

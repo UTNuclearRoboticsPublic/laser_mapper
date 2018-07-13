@@ -84,7 +84,7 @@ canyon_mapper_output:
     publish:                    true
     incremental_update:         false
     throttle_publish:           false
-    retain_after_scan:          false
+    retain_after_scan:          true
     should_save:                true
     # Processing Data
     preprocessing: 

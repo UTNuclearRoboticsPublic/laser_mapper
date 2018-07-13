@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
+#include <std_msgs/Bool.h>
 #include <tf/transform_listener.h>
 #include <pcl_ros/transforms.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -13,6 +14,7 @@
 // In-package Libraries
 #include "laser_mapper/cloud_map.h"
 #include "laser_mapper/cloud_map_list.h"
+#include "laser_mapper/cloud_select_service.h"
 
 class LaserMapper
 {
@@ -51,17 +53,23 @@ private:
 	void fullScanCallback(const sensor_msgs::PointCloud2 scan);
 	//   Actually performs map updates, regardless of whether planar or full 
 	void updateMap(const sensor_msgs::PointCloud2 scan, PointcloudMap * map);
+	//   Resets Non-persistent Clouds 
+	void routineEndCallback(const std_msgs::Bool::ConstPtr& new_state);
 
 	// *** Outputs Full Clouds ***
 	bool saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);
+	// *** Resets a Select List of Clouds *** 
+	bool resetClouds(laser_mapper::cloud_select_service::Request &req, laser_mapper::cloud_select_service::Response &res);
 
 	ros::Subscriber planar_scan_sub_;
 	ros::Subscriber full_scan_sub_;
+	ros::Subscriber scan_end_sub_;
 
 	std::vector<PointcloudMap> outputs_;
 	ros::Publisher output_cloud_pub_;
 
 	ros::ServiceServer cloud_saving_server_;
+	ros::ServiceServer cloud_resetting_server_;
 	ros::ServiceClient pointcloud_processor_;
 	tf::TransformListener tf_listener_;
 	ros::NodeHandle nh_;
