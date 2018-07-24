@@ -20,7 +20,7 @@ LaserMapper::LaserMapper()
 	full_scan_sub_ = nh_.subscribe<sensor_msgs::PointCloud2>(subscriber_topics, 100, &LaserMapper::fullScanCallback, this);
 	if( !nh_.param<std::string>("laser_stitcher/scanning_state_topic", subscriber_topics, "laser_stitcher/scanning_state") )
 		ROS_WARN_STREAM("[LaserMapper] Failed to get routine ending message topic from parameter server - defaulting to " << subscriber_topics << ".");
-	scan_end_sub_ = nh_.subscribe<std_msgs::Bool>(subscriber_topics, 100, &LaserMapper::routineEndCallback, this);
+	scan_end_sub_ = nh_.subscribe<std_msgs::Bool>(subscriber_topics, 100, &LaserMapper::routineStartCallback, this);
 
 	// *** Set Up Settings ***
 	std::string yaml_file_name;
@@ -68,7 +68,17 @@ void LaserMapper::fullScanCallback(const sensor_msgs::PointCloud2 scan)
 	for(int i=0; i<outputs_.size(); i++)
 	{
 		if(!outputs_[i].map.build_incrementally)
+		{
+			// If the cloud is not kept across scans, clear it before inserting the new cloud
+			//   For clouds that are 'built incrementally' this is handled in the new scan callback
+			//   in LaserMapper::routineStartCallback() below
+			if(!outputs_[i].map.persistent)
+			{
+				sensor_msgs::PointCloud2Modifier cloud_modifier_(outputs_[i].map.pointcloud);
+				cloud_modifier_.resize(0);
+			}
 			updateMap(scan, &outputs_[i]);
+		}
 	}
 }
 
@@ -161,22 +171,26 @@ bool LaserMapper::saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger:
 		//   Relies on external package <pointcloud_processing_server> 
 		if(outputs_[i].map.should_postprocess)
 		{
+			ROS_INFO_STREAM("[LaserMapper] Attempting to postprocess cloud " << outputs_[i].map.name << ", currently of size " << outputs_[i].map.pointcloud.width*outputs_[i].map.pointcloud.height);
 			if(outputs_[i].postprocessing_counter >= outputs_[i].map.postprocessing_throttle_max)
 			{
+				int num_postprocess_tasks = 0;
 				outputs_[i].pointcloud_postprocess.request.pointcloud = outputs_[i].map.pointcloud;
 				if(!pointcloud_processor_.call(outputs_[i].pointcloud_postprocess))
 					ROS_WARN_STREAM("[LaserMapper] Pointcloud Postprocess on map " << outputs_[i].map.name << " failed. Continuing using raw cloud.");
 				else
-					outputs_[i].map.pointcloud = outputs_[i].pointcloud_postprocess.response.task_results[outputs_[i].pointcloud_postprocess.response.task_results.size()-1].task_pointcloud;
+				{
+					num_postprocess_tasks = outputs_[i].pointcloud_postprocess.response.task_results.size();
+					outputs_[i].map.pointcloud = outputs_[i].pointcloud_postprocess.response.task_results[num_postprocess_tasks-1].task_pointcloud;
+				}
 				outputs_[i].postprocessing_counter = 0;
-				ROS_DEBUG_STREAM("[LaserMapper] " << outputs_[i].map.name << " - current full cloud size after postprocessing: " << outputs_[i].map.pointcloud.height*outputs_[i].map.pointcloud.width);
+				ROS_INFO_STREAM("[LaserMapper] " << outputs_[i].map.name << " - current full cloud size after postprocessing: " << outputs_[i].map.pointcloud.height*outputs_[i].map.pointcloud.width << ". Number of postprocess tasks: " << num_postprocess_tasks);
 			}
 			else outputs_[i].postprocessing_counter++;
 		}
 
 		// *** Output Publishing ***
 		outputs_[i].map_pub.publish(outputs_[i].map.pointcloud);
-
 		/// *** Save To Bag ***
 		if(outputs_[i].map.should_save)
 		{
@@ -187,11 +201,8 @@ bool LaserMapper::saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger:
 			ROS_INFO_STREAM("[LaserMapper] Saved a ROSBAG to the file " << bag_name);
 		}
 		ROS_INFO_STREAM("[LaserMapper] Outputting a full map with name " << outputs_[i].map.name << ". Cloud size: " << outputs_[i].map.pointcloud.height * outputs_[i].map.pointcloud.width << ".");
-
-		sensor_msgs::PointCloud2Modifier cloud_modifier_(outputs_[i].map.pointcloud);
-		cloud_modifier_.resize(0);
-
 	}
+	return true;
 } 
 
 
@@ -209,6 +220,8 @@ bool LaserMapper::resetClouds(laser_mapper::cloud_select_service::Request &req, 
 		{
 			if(req.cloud_list[i].compare(outputs_[j].map.name) == 0)
 			{
+				sensor_msgs::PointCloud2Modifier cloud_modifier_(outputs_[i].map.pointcloud);
+				cloud_modifier_.resize(0);
 				res.success[i] = true;
 				break;
 			}
@@ -216,6 +229,7 @@ bool LaserMapper::resetClouds(laser_mapper::cloud_select_service::Request &req, 
 		if(res.success[i] == false)
 			ROS_WARN_STREAM("[LaserMapper] Reset requested for cloud " << req.cloud_list[i] << ", but that that cloud is not known.");
 	}
+	return true;
 }
 
 
@@ -225,17 +239,20 @@ bool LaserMapper::resetClouds(laser_mapper::cloud_select_service::Request &req, 
 // Scan Finished Callback
 //   This listens for when laser_stitcher receives an input message to end a scanning routine. 
 //   Once this occurs, the laser_mapper will reset any clouds which have 'persistent' set to false (the yaml parameter retain_after_scan)
-void LaserMapper::routineEndCallback(const std_msgs::Bool::ConstPtr& new_state)
+void LaserMapper::routineStartCallback(const std_msgs::Bool::ConstPtr& new_state)
 {
 	// Only reset non-persistent clouds when a new scan routine is being STARTED
 	//   This means that when a routine is ended laser_mapper clouds will be kept until a new one is started (useful if only running once, not in loop)
 	//   Note - right now this doesn't check the state of the laser_stitcher, so if a second 'start' message is received during a running routine,
 	//   the laser_mapper clouds will be reset even though the laser_stitcher clouds will not.
+	// Only clouds that are 'incrementally' built are cleared at the beginning of scans. Scans that are built at the end of a full routine but are not 
+	//   persistent across routines are kept through the routine following their creation and only cleared once new data comes in 
 	if(!new_state->data)
 		return; 			  
 	for(int i=0; i<outputs_.size(); i++)
 	{
-		if(!outputs_[i].map.persistent)
+		ROS_INFO_STREAM("[LaserMapper] Starting a new laser_stitcher scan routine. Cloud " << outputs_[i].map.name << " size is currently " << outputs_[i].map.pointcloud.height*outputs_[i].map.pointcloud.width);
+		if(!outputs_[i].map.persistent && outputs_[i].map.build_incrementally)
 		{
 			sensor_msgs::PointCloud2 new_cloud;
 			new_cloud.header.frame_id = outputs_[i].map.pointcloud.header.frame_id;
@@ -255,8 +272,8 @@ int main(int argc, char** argv)
 {
 	ros::init(argc, argv, "laser_mapper");
 
-if( ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug) )
-    ros::console::notifyLoggerLevelsChanged();
+//if( ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug) )
+//    ros::console::notifyLoggerLevelsChanged();
 
 	LaserMapper laser_mapper;
 }

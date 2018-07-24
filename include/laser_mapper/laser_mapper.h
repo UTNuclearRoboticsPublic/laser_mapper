@@ -54,7 +54,7 @@ private:
 	//   Actually performs map updates, regardless of whether planar or full 
 	void updateMap(const sensor_msgs::PointCloud2 scan, PointcloudMap * map);
 	//   Resets Non-persistent Clouds 
-	void routineEndCallback(const std_msgs::Bool::ConstPtr& new_state);
+	void routineStartCallback(const std_msgs::Bool::ConstPtr& new_state);
 
 	// *** Outputs Full Clouds ***
 	bool saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger::Response &res);

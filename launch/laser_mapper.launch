@@ -21,7 +21,7 @@
       pkg     = "pointcloud_processing_server"
       type    = "pointcloud_processing_server"
       args    = "-intensity"
-      output  = "screen"
+      output  = "log"
     >
   </node>
 

@@ -76,7 +76,18 @@ canyon_mapper_output:
           should_publish:   true
           publish_topic:    voxelized_cloud
     postprocessing: 
-      should_process:       false
+      should_process:       true
+      min_cloud_size:             50
+      throttle:                   false
+      throttle_max:               1
+      task_list:            [ voxelize ]
+      tasks:
+        voxelize:           
+          type:             3     # Voxelization
+          leaf_sizes:       [ 0.02, 0.02, 0.02 ]
+          keep_ordered:     false
+          should_publish:   true
+          publish_topic:    voxelized_cloud
 # This is the last fully dense full scan 
   local_dense_cloud: 
     desired_frame:              base_link

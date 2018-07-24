@@ -138,7 +138,7 @@ include_directories(
 add_executable(laser_mapper src/laser_mapper.cpp)
 add_dependencies(
    laser_mapper
-  ${laser_stitcher_EXPORTED_TARGETS}
+  ${laser_mapper_EXPORTED_TARGETS}
    ${catkin_EXPORTED_TARGETS}
 )
 target_link_libraries(
