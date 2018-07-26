@@ -194,11 +194,17 @@ bool LaserMapper::saveClouds(std_srvs::Trigger::Request &req, std_srvs::Trigger:
 		/// *** Save To Bag ***
 		if(outputs_[i].map.should_save)
 		{
+			// Save ROS Bag File
 			rosbag::Bag bag;
 			std::string bag_name = "laser_mapper_" + outputs_[i].map.name + std::to_string(ros::Time::now().toSec()) + ".bag";
 			bag.open(bag_name, rosbag::bagmode::Write);
 			bag.write(outputs_[i].map_pub.getTopic(), ros::Time::now(), outputs_[i].map.pointcloud);
 			ROS_INFO_STREAM("[LaserMapper] Saved a ROSBAG to the file " << bag_name);
+			// Save PCL PCD File 
+			pcl::PointCloud<pcl::PointXYZI> temp_cloud;
+			pcl::fromROSMsg(outputs_[i].map.pointcloud, temp_cloud);
+		    pcl::io::savePCDFileASCII("laser_mapper_" + outputs_[i].map.name + std::to_string(ros::Time::now().toSec()) + ".pcd", temp_cloud);
+		    ROS_INFO_STREAM("[LaserMapper] Saved " << temp_cloud.points.size() << " data points to a pcd file");
 		}
 		ROS_INFO_STREAM("[LaserMapper] Outputting a full map with name " << outputs_[i].map.name << ". Cloud size: " << outputs_[i].map.pointcloud.height * outputs_[i].map.pointcloud.width << ".");
 	}
