@@ -3,7 +3,7 @@ canyon_mapper_output:
   cloud_list:           [nav_cloud, map_cloud, local_dense_cloud]
 # This cloud is used for navigation, updated regularly and kept sparse
   nav_cloud: 
-    desired_frame:              base_link
+    desired_frame:              map
     # Publishing
     publish:                    true
     incremental_update:         false
@@ -90,7 +90,7 @@ canyon_mapper_output:
           publish_topic:    voxelized_cloud
 # This is the last fully dense full scan 
   local_dense_cloud: 
-    desired_frame:              base_link
+    desired_frame:              map
     # Publishing
     publish:                    true
     incremental_update:         false
