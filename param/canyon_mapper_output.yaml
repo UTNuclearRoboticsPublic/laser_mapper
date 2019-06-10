@@ -71,20 +71,20 @@ canyon_mapper_output:
           publish_topic:    clipped_cloud
         voxelize:           
           type:             3     # Voxelization
-          leaf_sizes:       [ 0.02, 0.02, 0.02 ]
+          leaf_sizes:       [ 0.01, 0.01, 0.01 ]
           keep_ordered:     false
           should_publish:   true
           publish_topic:    voxelized_cloud
     postprocessing: 
       should_process:       true
       min_cloud_size:             50
-      throttle:                   false
-      throttle_max:               1
+      throttle:                   true
+      throttle_max:               10
       task_list:            [ voxelize ]
       tasks:
         voxelize:           
           type:             3     # Voxelization
-          leaf_sizes:       [ 0.02, 0.02, 0.02 ]
+          leaf_sizes:       [ 0.01, 0.01, 0.01 ]
           keep_ordered:     false
           should_publish:   true
           publish_topic:    voxelized_cloud

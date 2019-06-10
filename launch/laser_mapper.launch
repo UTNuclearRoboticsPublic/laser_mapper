@@ -3,7 +3,7 @@
 
   <rosparam  command="load"  file="$(find laser_mapper)/param/canyon_mapper_output.yaml"/>
 
-  <include file="$(find laser_stitcher)/launch/arbotix.launch"> </include>
+  <!--include file="$(find laser_stitcher)/launch/arbotix.launch"> </include-->
 
    <node
       name    = "laser_mapper"
